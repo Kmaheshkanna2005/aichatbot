@@ -32,7 +32,7 @@
             display: none;
             margin-top: 10px;
         }
-        #question-section, #custom-question-section {
+        #question-section, #custom-question-section, #test-mode-section {
             display: none;
         }
         .loading-spinner {
@@ -46,6 +46,73 @@
         .btn-loading {
             pointer-events: none;
             opacity: 0.7;
+        }
+        /* Test Mode Styles */
+        .test-mode-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            display: none;
+        }
+        .test-mode-content {
+            text-align: center;
+            max-width: 600px;
+            padding: 30px;
+        }
+        .test-question {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+        }
+        .test-status {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+        }
+        .recording-indicator {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            margin: 20px auto;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .voice-btn.recording {
+            background-color: #dc3545;
+            animation: button-pulse 1.5s infinite;
+        }
+        @keyframes button-pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .answer-feedback {
+            margin-top: 15px;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        .correct-answer {
+            background-color: rgba(40, 167, 69, 0.2);
+            border-left: 4px solid #28a745;
+        }
+        .incorrect-answer {
+            background-color: rgba(220, 53, 69, 0.2);
+            border-left: 4px solid #dc3545;
+        }
+        .btn-test-mode {
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -86,7 +153,10 @@
                         <option value="10">10 questions</option>
                     </select>
                 </div>
-                <button class="btn btn-success" id="generate-btn">Generate Questions</button>
+                <div class="d-flex">
+                    <button class="btn btn-success" id="generate-btn">Generate Questions</button>
+                    <button class="btn btn-outline-primary btn-test-mode" id="test-mode-btn">Start Test Mode</button>
+                </div>
                 
                 <div id="questions-container" class="mt-4"></div>
             </div>
@@ -99,16 +169,93 @@
                     <label for="custom-question" class="form-label">Enter your question about the PDF content</label>
                     <textarea class="form-control" id="custom-question" rows="2" placeholder="What is the main topic discussed in this document?"></textarea>
                 </div>
-                <button class="btn btn-primary" id="ask-btn">Ask Question</button>
+                <div class="d-flex">
+                    <button class="btn btn-primary" id="ask-btn">Ask Question</button>
+                    <button class="btn btn-outline-secondary ms-2" id="voice-question-btn">
+                        <i class="bi bi-mic-fill"></i> Voice Input
+                    </button>
+                </div>
                 
                 <div id="custom-answer-container" class="mt-4"></div>
             </div>
+        </div>
+
+        <div class="card" id="test-mode-section">
+            <div class="card-body">
+                <h5 class="card-title">Test Mode</h5>
+                <p>Test your knowledge by answering the generated questions using voice or text.</p>
+                <div class="mb-3">
+                    <label for="test-answer" class="form-label">Your answer</label>
+                    <textarea class="form-control" id="test-answer" rows="3" placeholder="Type your answer here..."></textarea>
+                </div>
+                <div class="d-flex">
+                    <button class="btn btn-primary" id="submit-answer-btn">Submit Answer</button>
+                    <button class="btn btn-outline-secondary ms-2" id="voice-answer-btn">
+                        <i class="bi bi-mic-fill"></i> Voice Answer
+                    </button>
+                    <button class="btn btn-outline-danger ms-auto" id="end-test-btn">End Test</button>
+                </div>
+                <div id="answer-feedback" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Mode Overlay -->
+    <div class="test-mode-overlay" id="test-mode-overlay">
+        <div class="test-mode-content">
+            <h2>Test Mode</h2>
+            <p class="test-status" id="test-status">Please speak your answer clearly.</p>
+            <div class="test-question" id="overlay-question"></div>
+            <div class="recording-indicator" id="recording-indicator"></div>
+            <p>Press ESC key or click outside to cancel</p>
         </div>
     </div>
 
     <script>
         // Global variables
         let sessionId = null;
+        let currentQuestions = [];
+        let currentAnswers = [];
+        let currentTestQuestion = null;
+        let currentTestIndex = 0;
+        let recognition = null;
+        
+        // Initialize speech recognition if available
+        function initSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.onresult = function(event) {
+                    const transcript = event.results[0][0].transcript;
+                    if (document.getElementById('test-mode-overlay').style.display === 'flex') {
+                        document.getElementById('test-answer').value = transcript;
+                        endVoiceRecording();
+                        setTimeout(() => {
+                            document.getElementById('submit-answer-btn').click();
+                        }, 500);
+                    } else {
+                        document.getElementById('custom-question').value = transcript;
+                    }
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    endVoiceRecording();
+                };
+                
+                recognition.onend = function() {
+                    endVoiceRecording();
+                };
+                
+                return true;
+            } else {
+                console.warn('Speech recognition not supported in this browser');
+                return false;
+            }
+        }
         
         // DOM elements
         const uploadForm = document.getElementById('upload-form');
@@ -119,12 +266,23 @@
         const fileInfo = document.getElementById('file-info');
         const questionSection = document.getElementById('question-section');
         const customQuestionSection = document.getElementById('custom-question-section');
+        const testModeSection = document.getElementById('test-mode-section');
         const numQuestionsSelect = document.getElementById('num-questions');
         const generateBtn = document.getElementById('generate-btn');
         const questionsContainer = document.getElementById('questions-container');
         const customQuestion = document.getElementById('custom-question');
         const askBtn = document.getElementById('ask-btn');
         const customAnswerContainer = document.getElementById('custom-answer-container');
+        const testModeBtn = document.getElementById('test-mode-btn');
+        const testModeOverlay = document.getElementById('test-mode-overlay');
+        const overlayQuestion = document.getElementById('overlay-question');
+        const testStatus = document.getElementById('test-status');
+        const testAnswer = document.getElementById('test-answer');
+        const submitAnswerBtn = document.getElementById('submit-answer-btn');
+        const voiceAnswerBtn = document.getElementById('voice-answer-btn');
+        const voiceQuestionBtn = document.getElementById('voice-question-btn');
+        const endTestBtn = document.getElementById('end-test-btn');
+        const answerFeedback = document.getElementById('answer-feedback');
         
         // Check if there's a session ID in the URL
         function checkForSession() {
@@ -236,6 +394,8 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+                    currentQuestions = data.questions;
+                    currentAnswers = data.answers;
                     displayQuestions(data.questions, data.answers);
                 } else {
                     questionsContainer.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
@@ -364,8 +524,188 @@
             `;
         }
         
-        // Check for session on page load
-        document.addEventListener('DOMContentLoaded', checkForSession);
+        // Test Mode functions
+        testModeBtn.addEventListener('click', function() {
+            if (currentQuestions.length === 0) {
+                alert('Please generate questions first');
+                return;
+            }
+            
+            startTestMode();
+        });
+        
+        function startTestMode() {
+            currentTestIndex = 0;
+            testModeSection.style.display = 'block';
+            questionSection.style.display = 'none';
+            customQuestionSection.style.display = 'none';
+            
+            // Reset and display first question
+            testAnswer.value = '';
+            answerFeedback.innerHTML = '';
+            displayTestQuestion(currentTestIndex);
+        }
+        
+        function displayTestQuestion(index) {
+            if (index >= currentQuestions.length) {
+                alert('Test completed!');
+                endTestMode();
+                return;
+            }
+            
+            currentTestQuestion = currentQuestions[index];
+            testModeSection.querySelector('.card-title').textContent = `Test Mode - Question ${index + 1} of ${currentQuestions.length}`;
+            testModeSection.querySelector('.card-body p').innerHTML = `<strong>Question:</strong> ${currentTestQuestion}`;
+            testAnswer.placeholder = `Type your answer to question ${index + 1} here...`;
+        }
+        
+        function endTestMode() {
+            testModeSection.style.display = 'none';
+            questionSection.style.display = 'block';
+            customQuestionSection.style.display = 'block';
+        }
+        
+        // Voice input for test mode
+        voiceAnswerBtn.addEventListener('click', function() {
+            if (recognition) {
+                startVoiceRecording('answer');
+            } else {
+                alert('Speech recognition is not supported in your browser');
+            }
+        });
+        
+        voiceQuestionBtn.addEventListener('click', function() {
+            if (recognition) {
+                startVoiceRecording('question');
+            } else {
+                alert('Speech recognition is not supported in your browser');
+            }
+        });
+        
+        function startVoiceRecording(mode) {
+            if (mode === 'answer') {
+                overlayQuestion.textContent = currentTestQuestion;
+                testStatus.textContent = 'Please speak your answer clearly.';
+            } else {
+                overlayQuestion.textContent = '';
+                testStatus.textContent = 'Please speak your question clearly.';
+            }
+            
+            testModeOverlay.style.display = 'flex';
+            setTimeout(() => {
+                recognition.start();
+                voiceAnswerBtn.classList.add('recording');
+            }, 300);
+        }
+        
+        function endVoiceRecording() {
+            testModeOverlay.style.display = 'none';
+            voiceAnswerBtn.classList.remove('recording');
+            voiceQuestionBtn.classList.remove('recording');
+        }
+        
+        // Close overlay when clicking outside or pressing ESC
+        testModeOverlay.addEventListener('click', function(e) {
+            if (e.target === testModeOverlay) {
+                recognition.stop();
+                endVoiceRecording();
+            }
+        });
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && testModeOverlay.style.display === 'flex') {
+                recognition.stop();
+                endVoiceRecording();
+            }
+        });
+        
+        // Submit answer in test mode
+        submitAnswerBtn.addEventListener('click', function() {
+            const userAnswer = testAnswer.value.trim();
+            if (!userAnswer) {
+                alert('Please enter your answer');
+                return;
+            }
+            
+            const correctAnswer = currentAnswers[currentTestIndex];
+            
+            // Calculate similarity between user answer and correct answer
+            const similarity = calculateSimilarity(userAnswer, correctAnswer);
+            const score = Math.round(similarity * 100);
+            
+            // Display feedback
+            if (score >= 70) {
+                answerFeedback.innerHTML = `
+                    <div class="answer-feedback correct-answer">
+                        <h5>Correct! (${score}% match)</h5>
+                        <p>Your answer matches the key concepts in the correct answer.</p>
+                        <hr>
+                        <p><strong>Correct answer:</strong> ${correctAnswer}</p>
+                    </div>
+                `;
+            } else {
+                answerFeedback.innerHTML = `
+                    <div class="answer-feedback incorrect-answer">
+                        <h5>Needs improvement (${score}% match)</h5>
+                        <p>Your answer missed some key concepts.</p>
+                        <hr>
+                        <p><strong>Correct answer:</strong> ${correctAnswer}</p>
+                    </div>
+                `;
+            }
+            
+            // Add next question button
+            answerFeedback.innerHTML += `
+                <div class="mt-3">
+                    <button class="btn btn-primary" id="next-question-btn">
+                        ${currentTestIndex < currentQuestions.length - 1 ? 'Next Question' : 'Finish Test'}
+                    </button>
+                </div>
+            `;
+            
+            // Add event listener to next question button
+            document.getElementById('next-question-btn').addEventListener('click', function() {
+                currentTestIndex++;
+                if (currentTestIndex < currentQuestions.length) {
+                    displayTestQuestion(currentTestIndex);
+                    testAnswer.value = '';
+                    answerFeedback.innerHTML = '';
+                } else {
+                    alert('Test completed!');
+                    endTestMode();
+                }
+            });
+        });
+        
+        // End test button
+        endTestBtn.addEventListener('click', function() {
+            if (confirm('Are you sure you want to end the test?')) {
+                endTestMode();
+            }
+        });
+        
+        // Simple string similarity function
+        function calculateSimilarity(str1, str2) {
+            // Convert to lowercase and remove punctuation
+            const clean1 = str1.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+            const clean2 = str2.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+            
+            // Split into words
+            const words1 = clean1.split(/\s+/);
+            const words2 = clean2.split(/\s+/);
+            
+            // Count common words
+            const commonWords = words1.filter(word => words2.includes(word));
+            
+            // Calculate Dice coefficient
+            return (2 * commonWords.length) / (words1.length + words2.length);
+        }
+        
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', function() {
+            checkForSession();
+            initSpeechRecognition();
+        });
     </script>
 </body>
 </html>
