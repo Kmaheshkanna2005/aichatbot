@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Buddy</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 960px;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .question-card {
+            margin-bottom: 15px;
+            border-left: 4px solid #007bff;
+        }
+        .answer-card {
+            background-color: #f8f9fa;
+            border-left: 4px solid #28a745;
+        }
+        .custom-file-input:lang(en)::after {
+            content: "Select PDF";
+        }
+        #upload-progress {
+            display: none;
+            margin-top: 10px;
+        }
+        #question-section, #custom-question-section {
+            display: none;
+        }
+        .loading-spinner {
+            margin-right: 10px;
+        }
+        #file-info {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .btn-loading {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="text-center mb-4">
+            <h1 class="display-4">Study-Buddy</h1>
+            <p class="lead">Upload a PDF and generate insightful questions with answers</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Upload PDF Document</h5>
+                <form id="upload-form">
+                    <div class="mb-3">
+                        <label for="pdf-file" class="form-label">Choose a PDF file</label>
+                        <input class="form-control" type="file" id="pdf-file" accept=".pdf" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="upload-btn">Upload and Process</button>
+                </form>
+                
+                <div class="progress mt-3" id="upload-progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                </div>
+                
+                <div id="file-info"></div>
+            </div>
+        </div>
+
+        <div class="card" id="question-section">
+            <div class="card-body">
+                <h5 class="card-title">Generate Questions</h5>
+                <div class="mb-3">
+                    <label for="num-questions" class="form-label">Number of questions to generate</label>
+                    <select class="form-select" id="num-questions">
+                        <option value="3">3 questions</option>
+                        <option value="5" selected>5 questions</option>
+                        <option value="10">10 questions</option>
+                    </select>
+                </div>
+                <button class="btn btn-success" id="generate-btn">Generate Questions</button>
+                
+                <div id="questions-container" class="mt-4"></div>
+            </div>
+        </div>
+
+        <div class="card" id="custom-question-section">
+            <div class="card-body">
+                <h5 class="card-title">Ask Your Own Question</h5>
+                <div class="mb-3">
+                    <label for="custom-question" class="form-label">Enter your question about the PDF content</label>
+                    <textarea class="form-control" id="custom-question" rows="2" placeholder="What is the main topic discussed in this document?"></textarea>
+                </div>
+                <button class="btn btn-primary" id="ask-btn">Ask Question</button>
+                
+                <div id="custom-answer-container" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let sessionId = null;
+        
+        // DOM elements
+        const uploadForm = document.getElementById('upload-form');
+        const pdfFileInput = document.getElementById('pdf-file');
+        const uploadBtn = document.getElementById('upload-btn');
+        const uploadProgress = document.getElementById('upload-progress');
+        const progressBar = uploadProgress.querySelector('.progress-bar');
+        const fileInfo = document.getElementById('file-info');
+        const questionSection = document.getElementById('question-section');
+        const customQuestionSection = document.getElementById('custom-question-section');
+        const numQuestionsSelect = document.getElementById('num-questions');
+        const generateBtn = document.getElementById('generate-btn');
+        const questionsContainer = document.getElementById('questions-container');
+        const customQuestion = document.getElementById('custom-question');
+        const askBtn = document.getElementById('ask-btn');
+        const customAnswerContainer = document.getElementById('custom-answer-container');
+        
+        // Check if there's a session ID in the URL
+        function checkForSession() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlSessionId = urlParams.get('session');
+            
+            if (urlSessionId) {
+                // Try to load the session
+                fetch(`/api/session/${urlSessionId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            sessionId = urlSessionId;
+                            fileInfo.innerHTML = `<strong>Active PDF:</strong> ${data.filename} (${data.chunks} chunks)`;
+                            questionSection.style.display = 'block';
+                            customQuestionSection.style.display = 'block';
+                        }
+                    })
+                    .catch(error => console.error('Error checking session:', error));
+            }
+        }
+        
+        // Handle file upload
+        uploadForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const file = pdfFileInput.files[0];
+            if (!file) {
+                alert('Please select a PDF file');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('pdf', file);
+            
+            // Show progress
+            uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading...';
+            uploadBtn.classList.add('btn-loading');
+            uploadProgress.style.display = 'block';
+            progressBar.style.width = '0%';
+            
+            // Simulate progress (since actual progress is not available from fetch)
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += 5;
+                if (progress > 90) clearInterval(progressInterval);
+                progressBar.style.width = `${progress}%`;
+            }, 300);
+            
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearInterval(progressInterval);
+                progressBar.style.width = '100%';
+                
+                if (data.success) {
+                    sessionId = data.session_id;
+                    fileInfo.innerHTML = `<strong>Uploaded PDF:</strong> ${data.filename} (${data.chunks} chunks)`;
+                    
+                    // Add session ID to URL for sharing/refreshing
+                    const url = new URL(window.location);
+                    url.searchParams.set('session', sessionId);
+                    window.history.pushState({}, '', url);
+                    
+                    // Show question sections
+                    questionSection.style.display = 'block';
+                    customQuestionSection.style.display = 'block';
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error uploading file:', error);
+                alert('Error uploading file. Please try again.');
+            })
+            .finally(() => {
+                uploadBtn.innerHTML = 'Upload and Process';
+                uploadBtn.classList.remove('btn-loading');
+                setTimeout(() => {
+                    uploadProgress.style.display = 'none';
+                }, 1000);
+            });
+        });
+        
+        // Generate questions
+        generateBtn.addEventListener('click', function() {
+            if (!sessionId) {
+                alert('Please upload a PDF first');
+                return;
+            }
+            
+            generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
+            generateBtn.classList.add('btn-loading');
+            questionsContainer.innerHTML = '<div class="text-center my-4"><div class="spinner-border" role="status"></div><p class="mt-2">Generating insightful questions...</p></div>';
+            
+            fetch('/api/generate-questions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    numQuestions: parseInt(numQuestionsSelect.value)
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayQuestions(data.questions, data.answers);
+                } else {
+                    questionsContainer.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error generating questions:', error);
+                questionsContainer.innerHTML = '<div class="alert alert-danger">Error generating questions. Please try again.</div>';
+            })
+            .finally(() => {
+                generateBtn.innerHTML = 'Generate Questions';
+                generateBtn.classList.remove('btn-loading');
+            });
+        });
+        
+        // Display questions and answers
+        function displayQuestions(questions, answers) {
+            questionsContainer.innerHTML = '';
+            
+            if (questions.length === 0) {
+                questionsContainer.innerHTML = '<div class="alert alert-info">No questions generated. Try with a different PDF.</div>';
+                return;
+            }
+            
+            questions.forEach((question, index) => {
+                const answer = answers[index];
+                
+                const questionCard = document.createElement('div');
+                questionCard.className = 'card question-card';
+                questionCard.innerHTML = `
+                    <div class="card-body">
+                        <h5 class="card-title">Question ${index + 1}</h5>
+                        <p class="card-text">${question}</p>
+                        <button class="btn btn-sm btn-outline-primary toggle-answer" data-answer-id="answer-${index}">Show Answer</button>
+                        <div class="answer-container mt-3" id="answer-${index}" style="display: none;">
+                            <div class="card answer-card">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-muted">Answer:</h6>
+                                    <p class="card-text">${answer}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                questionsContainer.appendChild(questionCard);
+            });
+            
+            // Add event listeners to toggle answer visibility
+            document.querySelectorAll('.toggle-answer').forEach(button => {
+                button.addEventListener('click', function() {
+                    const answerId = this.getAttribute('data-answer-id');
+                    const answerContainer = document.getElementById(answerId);
+                    
+                    if (answerContainer.style.display === 'none') {
+                        answerContainer.style.display = 'block';
+                        this.textContent = 'Hide Answer';
+                    } else {
+                        answerContainer.style.display = 'none';
+                        this.textContent = 'Show Answer';
+                    }
+                });
+            });
+        }
+        
+        // Ask custom question
+        askBtn.addEventListener('click', function() {
+            if (!sessionId) {
+                alert('Please upload a PDF first');
+                return;
+            }
+            
+            const question = customQuestion.value.trim();
+            if (!question) {
+                alert('Please enter a question');
+                return;
+            }
+            
+            askBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
+            askBtn.classList.add('btn-loading');
+            customAnswerContainer.innerHTML = '<div class="text-center my-4"><div class="spinner-border" role="status"></div><p class="mt-2">Searching for answer...</p></div>';
+            
+            fetch('/api/answer-question', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    question: question
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayCustomAnswer(data.question, data.answer);
+                } else {
+                    customAnswerContainer.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error answering question:', error);
+                customAnswerContainer.innerHTML = '<div class="alert alert-danger">Error processing your question. Please try again.</div>';
+            })
+            .finally(() => {
+                askBtn.innerHTML = 'Ask Question';
+                askBtn.classList.remove('btn-loading');
+            });
+        });
+        
+        // Display custom answer
+        function displayCustomAnswer(question, answer) {
+            customAnswerContainer.innerHTML = `
+                <div class="card question-card">
+                    <div class="card-body">
+                        <h5 class="card-title">Your Question</h5>
+                        <p class="card-text">${question}</p>
+                    </div>
+                </div>
+                <div class="card answer-card mt-3">
+                    <div class="card-body">
+                        <h5 class="card-title">Answer</h5>
+                        <p class="card-text">${answer}</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Check for session on page load
+        document.addEventListener('DOMContentLoaded', checkForSession);
+    </script>
+</body>
+</html>
